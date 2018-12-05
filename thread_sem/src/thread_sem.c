@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <semaphore.h>
 #include <fcntl.h>
 #include <termios.h>
 #include <errno.h>
@@ -11,6 +12,8 @@
 int set_parity (int fd, int databits, int stopbits, int parity);
 int set_speed (int fd, int speed);
 void *uart_thread(void *argv);
+sem_t sem;
+sem_t* psem = &sem;
 /******************************************************************************
 ** 函数名称: main
 ** 功能描述: 程序主函数
@@ -18,8 +21,9 @@ void *uart_thread(void *argv);
 int main (int argc, char *argv[])
 {
     int     ret;
-    pthread_t tid;
+    pthread_t tid[5];
     int     fd_tty;
+    int i;
     /*
      * 参数个数小于2则返回
      */
@@ -44,16 +48,20 @@ int main (int argc, char *argv[])
         close(fd_tty);
         return  (-1);
     }
-    ret = pthread_create(&tid, NULL, uart_thread, (void *)fd_tty);  /*创建一个串口线程*/
+    for (i = 0; i < 5; i++) {                                /*  创建 5 个线程          */
+        ret = pthread_create(&tid[i], NULL, uart_thread, (void *)fd_tty);
           if (ret != 0) {
              printf("create thread failed\n");
              exit(-1);
           }
+    }
+    sem_init(&sem, 0, 1);
     /*
      * 在 while 循环中，不断的检查数据，若收到数据，将数据通过此串口发送回主机
      */
     while(1) {
     }
+    sem_destroy(psem);
     close(fd_tty);
     return  (0);
 }
@@ -62,9 +70,16 @@ void *uart_thread(void *argv){
     int fd_tty = (int)argv;
     int nread;
     char buff[512];
+    char pid[20];
+    sprintf(pid, "thread(%d):\0", ((int)pthread_self()) % 100);
     while(1){
         nread = read (fd_tty, buff ,512);
-        if(nread != -1) write(fd_tty, buff, nread);
+        if(nread != -1) {
+            sem_wait(psem);
+            write(fd_tty, pid, strlen(pid));
+            write(fd_tty, buff, nread);
+            sem_post(psem);
+        }
     }
 }
 
